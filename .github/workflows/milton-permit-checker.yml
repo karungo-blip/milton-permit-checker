@@ -1,0 +1,62 @@
+name: Milton Permit Checker
+
+on:
+  schedule:
+    - cron: '0 12,14,16,18,20,22 * * 1-5'
+    - cron: '0 0 * * 2-6'
+  workflow_dispatch:
+
+jobs:
+  check-permit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run permit check
+        run: python check_permit.py
+
+      - name: Read result
+        id: result
+        run: |
+          RESULT=$(cat permit_result.txt)
+          echo "result=$RESULT" >> $GITHUB_OUTPUT
+          if grep -q "^FOUND" permit_result.txt; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send GitHub notification if permit found
+        if: steps.result.outputs.found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const result = require('fs').readFileSync('permit_result.txt', 'utf8');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🏠 PERMIT FOUND - 1138 Dent Terrace!',
+              body: `## Permit detected for 1138 Dent Terrace!\n\nCheck the portal: https://permits.milton.ca/citizenportal/app/public-search\n\n**Details:**\n\`\`\`\n${result}\n\`\`\`\n\nDetected at: ${new Date().toISOString()}`
+            });
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permit-screenshot-${{ github.run_number }}
+          path: permit_check_screenshot.png
+          retention-days: 7
